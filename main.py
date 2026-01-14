@@ -2,115 +2,114 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 
-# Configuração da página para aproveitar melhor o espaço
-st.set_page_config(layout="wide")
+# Configuração da página
+st.set_page_config(layout="wide", page_title="Análise de Carteira")
 
-# 1. Carregamento de Dados
+# 1. Funções de Carregamento (Mantidas com cache)
 @st.cache_data
 def carregar_dados(empresas):
-    if not empresas:
-        return pd.DataFrame()
+    if not empresas: return pd.DataFrame()
     texto_tickers = " ".join(empresas)
-    dados_acao = yf.Tickers(texto_tickers)
-    # Ajustado para o ano atual (2026 conforme contexto)
-    cotacoes_acao = dados_acao.history(start="2024-01-01", end="2026-01-14")
-    return cotacoes_acao["Close"]
+    dados = yf.Tickers(texto_tickers)
+    # Período ajustado conforme contexto
+    cotacoes = dados.history(start="2024-01-01", end="2026-01-14")
+    return cotacoes["Close"]
 
 @st.cache_data
-def carregar_tickers_acoes():
-    try:
-        base_tickers = pd.read_csv("IBOV.csv", sep=";", skiprows=2, encoding="latin1", skipfooter=2, engine="python")
-        tickers = base_tickers.iloc[:, 0].dropna().astype(str).tolist()
-        tickers = [item.strip() + ".SA" for item in tickers]
-        return tickers
-    except Exception:
-        return []
+def carregar_tickers_totais():
+    # Unindo carregamento de IBOV e IFIX
+    lista = []
+    for arq in ["IBOV.csv", "IFIX.csv"]:
+        try:
+            df = pd.read_csv(arq, sep=";", skiprows=2, encoding="latin1", skipfooter=2, engine="python")
+            tickers = df.iloc[:, 0].dropna().astype(str).tolist()
+            lista.extend([item.strip() + ".SA" for item in tickers])
+        except: continue
+    return sorted(list(set(lista)))
+
+# --- Interface ---
+tickers_disponiveis = carregar_tickers_totais()
+
+st.title("📊 Carteira Personalizada com Pesos")
+
+# 2. Sidebar - Configuração de Ativos e Pesos
+st.sidebar.header("1. Configuração da Carteira")
+lista_ativos = st.sidebar.multiselect("Escolha os ativos:", tickers_disponiveis)
+
+valor_investido_total = st.sidebar.number_input("Capital Total (R$):", min_value=0.0, value=1000.0, step=100.0)
+
+# Dicionário para armazenar os pesos
+pesos = {}
+if lista_ativos:
+    st.sidebar.write("---")
+    st.sidebar.subheader("2. Definir Pesos (%)")
     
-@st.cache_data
-def carregar_tickers_fiis():
-    try:
-        base_fiis = pd.read_csv("IFIX.csv", sep=";", skiprows=2, encoding="latin1", skipfooter=2, engine="python")
-        tickers_fiis = base_fiis.iloc[:, 0].dropna().astype(str).tolist()
-        tickers_fiis = [item.strip() + ".SA" for item in tickers_fiis]
-        return tickers_fiis
-    except Exception:
-        return []
-
-# --- Inicialização ---
-tickers_ibov = carregar_tickers_acoes()
-tickers_ifix = carregar_tickers_fiis()
-tickers_disponiveis = sorted(list(set(tickers_ibov + tickers_ifix)))
-
-st.title("📊 Dashboard de Performance: IBOV + IFIX")
-
-# 2. Filtros na Lateral (Responsivos)
-st.sidebar.header("Configurações da Carteira")
-lista_ativos = st.sidebar.multiselect("Selecione seus ativos:", tickers_disponiveis)
-
-# NOVO: Opção para o usuário colocar o valor da carteira
-valor_investido_total = st.sidebar.number_input("Valor Total Investido (R$):", min_value=0.0, value=1000.0, step=100.0)
+    peso_automatico = round(100 / len(lista_ativos), 2)
+    
+    for ativo in lista_ativos:
+        pesos[ativo] = st.sidebar.number_input(f"Peso % em {ativo}", 
+                                              min_value=0.0, 
+                                              max_value=100.0, 
+                                              value=peso_automatico)
+    
+    soma_pesos = sum(pesos.values())
+    st.sidebar.write(f"**Soma Total: {soma_pesos:.2f}%**")
+    
+    if abs(soma_pesos - 100) > 0.1:
+        st.sidebar.warning("⚠️ A soma dos pesos deve ser 100%")
+        st.stop()
 
 if not lista_ativos:
-    st.warning("Selecione os ativos no menu lateral para começar.")
+    st.info("Selecione os ativos na barra lateral para começar.")
     st.stop()
 
-# Carregar dados apenas dos ativos selecionados para otimizar
+# 3. Processamento de Dados
 dados_todos = carregar_dados(lista_ativos)
-dados_filtrados = dados_todos.copy()
+data_inicial, data_final = dados_todos.index.min(), dados_todos.index.max()
 
-# 3. Slider de Data
-data_inicial = dados_filtrados.index.min().to_pydatetime()
-data_final = dados_filtrados.index.max().to_pydatetime()
-
-intervalo_data = st.sidebar.slider("Período de Análise", 
-                                   min_value=data_inicial,
-                                   max_value=data_final,
-                                   value=(data_inicial, data_final),
+intervalo_data = st.sidebar.slider("Período", min_value=data_inicial.to_pydatetime(), 
+                                   max_value=data_final.to_pydatetime(), 
+                                   value=(data_inicial.to_pydatetime(), data_final.to_pydatetime()),
                                    format="DD/MM/YYYY")
 
-dados_filtrados = dados_filtrados.loc[intervalo_data[0]:intervalo_data[1]]
+dados_filtrados = dados_todos.loc[intervalo_data[0]:intervalo_data[1]].copy()
 
-# 4. Gráfico Responsivo
-st.subheader("Evolução das Cotações")
+# 4. Cálculos de Performance
+st.subheader("Evolução da Carteira")
 st.line_chart(dados_filtrados)
 
-# 5. Cálculo de Performance
-st.write("---")
-st.subheader("Performance Individual e da Carteira")
-
-# Criando colunas para métricas principais (Responsividade)
-col1, col2 = st.columns(2)
-
-carteira_rendimento_percentual = []
-valor_por_ativo = valor_investido_total / len(lista_ativos)
-
-texto_performance_ativos = ""
+valor_final_carteira = 0
+detalhes_performance = []
 
 for ativo in lista_ativos:
-    coluna_ativo = dados_filtrados[ativo].dropna()
-    
-    if not coluna_ativo.empty:
-        # Cálculo: ((Final / Inicial) - 1)
-        performance_ativo = (coluna_ativo.iloc[-1] / coluna_ativo.iloc[0]) - 1
-        carteira_rendimento_percentual.append(performance_ativo)
+    coluna = dados_filtrados[ativo].dropna()
+    if not coluna.empty:
+        perf_ativa = (coluna.iloc[-1] / coluna.iloc[0]) - 1
         
-        cor = "green" if performance_ativo >= 0 else "red"
-        texto_performance_ativos += f"- {ativo}: :{cor}[{performance_ativo:.2%}]\n"
+        # Cálculo baseado no peso definido pelo usuário
+        valor_alocado = valor_investido_total * (pesos[ativo] / 100)
+        valor_final_ativo = valor_alocado * (1 + perf_ativa)
+        valor_final_carteira += valor_final_ativo
+        
+        detalhes_performance.append({
+            "Ativo": ativo,
+            "Peso": f"{pesos[ativo]}%",
+            "Performance": perf_ativa,
+            "Valor Final": valor_final_ativo
+        })
 
-# 6. Exibição dos Resultados em Cards (Métricas)
-if carteira_rendimento_percentual:
-    # Média aritmética da performance dos ativos selecionados
-    performance_media = sum(carteira_rendimento_percentual) / len(carteira_rendimento_percentual)
-    valor_final_total = valor_investido_total * (1 + performance_media)
-    lucro_prejuizo = valor_final_total - valor_investido_total
+# 5. Dashboard de Resultados
+perf_total_global = (valor_final_carteira / valor_investido_total) - 1
+lucro_prejuizo_total = valor_final_carteira - valor_investido_total
 
-    with col1:
-        st.metric("Performance Total", f"{performance_media:.2%}", delta=f"{performance_media:.2%}")
-    
-    with col2:
-        st.metric("Valor Final Estimado", f"R$ {valor_final_total:,.2f}", delta=f"R$ {lucro_prejuizo:,.2f}")
+m1, m2, m3 = st.columns(3)
+m1.metric("Investimento Inicial", f"R$ {valor_investido_total:,.2f}")
+m2.metric("Valor Final da Carteira", f"R$ {valor_final_carteira:,.2f}", f"{perf_total_global:.2%}")
+m3.metric("Lucro/Prejuízo", f"R$ {lucro_prejuizo_total:,.2f}", f"{perf_total_global:.2%}")
 
-    st.write("#### Detalhes por Ativo")
-    st.markdown(texto_performance_ativos)
-
-    st.info(f"O cálculo considera que o valor de **R$ {valor_investido_total:,.2f}** foi dividido igualmente entre os {len(lista_ativos)} ativos selecionados.")
+# Tabela Detalhada (Responsiva)
+st.write("### Detalhamento por Ativo")
+df_resumo = pd.DataFrame(detalhes_performance)
+df_resumo["Performance"] = df_resumo["Performance"].map("{:.2%}".format)
+df_resumo["Valor Final"] = df_resumo["Valor Final"].map("R$ {:,.2f}".format)
+st.table(df_resumo)
