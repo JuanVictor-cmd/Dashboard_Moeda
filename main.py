@@ -30,7 +30,7 @@ def carregar_tickers_totais():
 # --- Interface ---
 tickers_disponiveis = carregar_tickers_totais()
 
-st.title("📊 Carteira Personalizada com Pesos")
+st.title("📊 Carteira Personalizada")
 
 # 2. Sidebar - Configuração de Ativos e Pesos
 st.sidebar.header("1. Configuração da Carteira")
