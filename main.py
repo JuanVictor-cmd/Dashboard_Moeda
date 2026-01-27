@@ -65,13 +65,22 @@ if not lista_ativos:
 
 # 3. Processamento de Dados
 dados_todos = carregar_dados(lista_ativos)
+
+# Remove o fuso horário (timezone) para evitar o KeyError no slider
+dados_todos.index = dados_todos.index.tz_localize(None)
+
 data_inicial, data_final = dados_todos.index.min(), dados_todos.index.max()
 
-intervalo_data = st.sidebar.slider("Período", min_value=data_inicial.to_pydatetime(), 
-                                   max_value=data_final.to_pydatetime(), 
-                                   value=(data_inicial.to_pydatetime(), data_final.to_pydatetime()),
-                                   format="DD/MM/YYYY")
+# Agora o slider funcionará corretamente
+intervalo_data = st.sidebar.slider(
+    "Período", 
+    min_value=data_inicial.to_pydatetime(), 
+    max_value=data_final.to_pydatetime(), 
+    value=(data_inicial.to_pydatetime(), data_final.to_pydatetime()),
+    format="DD/MM/YYYY"
+)
 
+# Filtragem robusta usando as datas selecionadas
 dados_filtrados = dados_todos.loc[intervalo_data[0]:intervalo_data[1]].copy()
 
 # 4. Cálculos de Performance
